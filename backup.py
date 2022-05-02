@@ -1,8 +1,8 @@
-import argparse
 from pathlib import Path
 from typing import Union
-import datetime
+from datetime import date, datetime
 import calendar
+from dateutil.relativedelta import relativedelta
 
 
 class SonFatherGrandfather:
@@ -18,14 +18,11 @@ class SonFatherGrandfather:
         5) If day == first day of month --> remove snapshots from "weekly" backup directory
         6) If day == first day of month --> remove snapshots form "monthly" backup directory if >3 months old
     """
-    # todo: add logic/attributes to customize the age of backups e.g. only keep recent monthly backup, keep 18 daily
-    #  backups, etc.
     def __init__(
             self,
             *,
             sfg_basic: bool = True,
             week_begins: str = "monday",
-            month_begins: int = 1,
             daily_count: int = 7,
             weekly_count: int = 4,
             monthly_count: int = 3,
@@ -47,26 +44,18 @@ class SonFatherGrandfather:
                                 beginning of the month.
         :param week_begins: Day that the week begins. Options: "monday", "tuesday", "wednesday", "thursday",
                             "friday", "saturday", "sunday" (default = "monday").
-        :param month_begins: Day of month that will be taken to represent the beginning of the monthly period. Currently
-                            has limited capabilities and only supports 1-28 due to differences in monthly durations.
-                            Will be added in future versions.
         """
 
-        # ensure day is valid
-        days_of_week = self._getDaysOfWeek()
-        if not str.lower(week_begins) in days_of_week:
-            raise ValueError("Unknown day")
-
-        self.WeekBegins = str.lower(week_begins)
-
-        # set the day for the month beginning
-        today = datetime.datetime.today()
-        days_in_month = calendar.monthrange(today.year, today.month)[1]
-
-        # account for months with fewer days
-        if month_begins > days_in_month:
-            month_begins = days_in_month
-        self.MonthBegins = month_begins
+        self.SfgBasic = sfg_basic
+        if self.SfgBasic:
+            self.DailyBackupCount = 7
+            self.WeeklyBackupCount = 4
+            self.MonthlyBackupCount = 3
+        else:
+            self.DailyBackupCount = daily_count
+            self.WeeklyBackupCount = weekly_count
+            self.MonthlyBackupCount = monthly_count
+        self.WeekBegins = calendar.setfirstweekday(getattr(calendar, week_begins.upper()))
 
         # set directories
         self.DailyBackupDirctoryLocal = daily_local
@@ -76,26 +65,68 @@ class SonFatherGrandfather:
         self.WeeklyBackupDirectoryRemote = weekly_remote
         self.MonthlyBackupDirectoryRemote = monthly_remote
 
-    @staticmethod
-    def _getDaysOfWeek() -> tuple:
-        """
-        Get the string name of each day of the week.
+        # protected attributes
+        self._Today = date.today()
 
-        :return: names of days
-        :rtype: tuple
-        """
+    @property
+    def Today(self):
+        return self._Today
 
-        days = list()
-        for i in range(0, 7):
-            weekday = datetime.date.today() + datetime.timedelta(days=i)
-            days.append(weekday.strftime("%A").lower())
-        return tuple(days)
+    @Today.setter
+    def Today(self, value) -> None:
+        if not isinstance(value, date) and value != date.today():
+            raise AttributeError("Protected attribute.")
 
-    def pruneDaily(self):
-        pass
+    @Today.deleter
+    def Today(self) -> None:
+        raise AttributeError("Protected attribute.")
 
-    def pruneWeekly(self):
-        pass
+    def _pruner(self, *, src: Path, threshold: datetime.date) -> None:
+        # will return list of files with their attributes re: creation/modification time
+        for path in src.iterdir():
+            info = path.stat()
+            created_on = datetime.fromtimestamp(info.st_ctime).date()
+            if created_on < threshold:
+                # rm file
+                pass
 
-    def pruneMonthly(self):
-        pass
+    # todo: make a wrapper??
+    def pruneDaily(self) -> None:
+        # if not beginning of week, don't prune
+        if self.SfgBasic:
+            if self._Today.weekday() != self.WeekBegins.getfirstweekday():
+                return
+        delta = relativedelta(days=self.DailyBackupCount)
+        threshold = self._Today - delta
+        self._pruner(src=self.DailyBackupDirctoryLocal, threshold=threshold)
+
+    def pruneWeekly(self) -> None:
+        # if not beginning of week, don't prune
+        if self.SfgBasic:
+            if self._Today.weekday() != self.WeekBegins.getfirstweekday():
+                return
+        delta = relativedelta(weeks=self.WeeklyBackupCount)
+        threshold = self._Today - delta
+        self._pruner(src=self.WeeklyBackupDirectoryLocal, threshold=threshold)
+
+    def pruneMonthly(self) -> None:
+        # if not beginning of week, don't prune
+        if self.SfgBasic:
+            if self._Today.weekday() != self.WeekBegins.getfirstweekday():
+                return
+        delta = date.today() - relativedelta(months=self.MonthlyBackupCount)
+        threshold = self._Today - delta
+        self._pruner(src=self.MonthlyBackupDirectoryLocal, threshold=threshold)
+
+
+if __name__ == '__main__':
+    root = Path.home().joinpath("Documents", "vms", "backups")
+
+    sfg = SonFatherGrandfather(
+        daily_local=root.joinpath("daily"),
+        weekly_local=root.joinpath("weekly"),
+        monthly_local=root.joinpath("monthly")
+    )
+    sfg.pruneDaily()
+    sfg.pruneWeekly()
+    sfg.pruneMonthly()
