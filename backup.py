@@ -6,18 +6,6 @@ from dateutil.relativedelta import relativedelta
 
 
 class SonFatherGrandfather:
-    """
-    Remove snapshots based on age
-    Week begins on Monday 12am (0000 hours)
-    Make backups and store appropriately
-        1) Keep all snapshots from Mon-Sun in the "daily" backup directory
-        2) Keep the Sunday snapshot --> move to the "weekly" backup directory
-        3) If day == first day of month --> move to "monthly" backup directory
-    Prune the backups
-        4) At beginning of week --> remove snapshots from previous Mon-Sat in the "daily" backup directory
-        5) If day == first day of month --> remove snapshots from "weekly" backup directory
-        6) If day == first day of month --> remove snapshots form "monthly" backup directory if >3 months old
-    """
     def __init__(
             self,
             *,
@@ -67,6 +55,20 @@ class SonFatherGrandfather:
 
         # protected attributes
         self._Today = date.today()
+        self._MonthBegins = 1
+
+    @property
+    def MonthBegins(self):
+        return self._MonthBegins
+
+    @MonthBegins.setter
+    def MonthBegins(self, value) -> None:
+        if value != 1:
+            raise AttributeError("Protected attribute.")
+
+    @MonthBegins.deleter
+    def MonthBegins(self) -> None:
+        raise AttributeError("Protected attribute.")
 
     @property
     def Today(self):
@@ -82,13 +84,11 @@ class SonFatherGrandfather:
         raise AttributeError("Protected attribute.")
 
     def _pruner(self, *, src: Path, threshold: datetime.date) -> None:
-        # will return list of files with their attributes re: creation/modification time
-        for path in src.iterdir():
-            info = path.stat()
+        for file in src.iterdir():
+            info = file.stat()
             created_on = datetime.fromtimestamp(info.st_ctime).date()
             if created_on < threshold:
-                # rm file
-                pass
+                file.unlink()
 
     # todo: make a wrapper??
     def pruneDaily(self) -> None:
@@ -110,23 +110,10 @@ class SonFatherGrandfather:
         self._pruner(src=self.WeeklyBackupDirectoryLocal, threshold=threshold)
 
     def pruneMonthly(self) -> None:
-        # if not beginning of week, don't prune
+        # if not beginning of month, don't prune
         if self.SfgBasic:
-            if self._Today.weekday() != self.WeekBegins.getfirstweekday():
+            if self._Today.day != self.MonthBegins:
                 return
         delta = date.today() - relativedelta(months=self.MonthlyBackupCount)
         threshold = self._Today - delta
         self._pruner(src=self.MonthlyBackupDirectoryLocal, threshold=threshold)
-
-
-if __name__ == '__main__':
-    root = Path.home().joinpath("Documents", "vms", "backups")
-
-    sfg = SonFatherGrandfather(
-        daily_local=root.joinpath("daily"),
-        weekly_local=root.joinpath("weekly"),
-        monthly_local=root.joinpath("monthly")
-    )
-    sfg.pruneDaily()
-    sfg.pruneWeekly()
-    sfg.pruneMonthly()
